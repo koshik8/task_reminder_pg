@@ -10,13 +10,14 @@ dependencies:
   flutter:
     sdk: flutter
     
-  alarm2: ^3.1.53
+  
   intl: ^0.20.2
   cupertino_icons: ^1.0.8
   flutter_local_notifications: ^18.0.1
   timezone: ^0.10.0
-  flutter_native_timezone: ^2.0.0
   permission_handler: ^11.3.1
+  flutter_timezone: ^4.1.0
+  alarm2: ^3.1.53
 
 dev_dependencies:
   flutter_test:

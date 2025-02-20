@@ -4,15 +4,13 @@ import 'package:intl/intl.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import 'package:timezone/timezone.dart' as tz;
 import 'package:timezone/data/latest.dart' as tz;
-import 'package:flutter_native_timezone/flutter_native_timezone.dart';
+import 'package:flutter_timezone/flutter_timezone.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'dart:io';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
   tz.initializeTimeZones(); // Initialize time zone database
-
-  
 
   // Initialize notifications
   final FlutterLocalNotificationsPlugin flutterLocalNotificationsPlugin =
@@ -32,11 +30,14 @@ void main() async {
       }
     },
   );
+
+  // Request notification permission
   if (Platform.isAndroid) {
     if (await Permission.notification.isDenied) {
       await Permission.notification.request();
     }
   }
+
   runApp(const MyApp());
 }
 
@@ -75,8 +76,6 @@ class _NewTaskScreenState extends State<NewTaskScreen> {
   final FlutterLocalNotificationsPlugin flutterLocalNotificationsPlugin =
       FlutterLocalNotificationsPlugin();
 
-  
-
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -94,8 +93,6 @@ class _NewTaskScreenState extends State<NewTaskScreen> {
               "Filter Date",
               style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
             ),
-            const SizedBox(height: 10),
-            ElevatedButton(onPressed: (){testNotification();}, child: Text('test')),
             const SizedBox(height: 10),
             Row(
               children: [
@@ -263,9 +260,7 @@ class _NewTaskScreenState extends State<NewTaskScreen> {
                     trailing: IconButton(
                       icon: const Icon(Icons.delete, color: Colors.red),
                       onPressed: () {
-                        setState(() {
-                          tasks.removeAt(index);
-                        });
+                        _deleteTask(index); // Delete task and its reminder
                       },
                     ),
                   );
@@ -515,8 +510,18 @@ class _NewTaskScreenState extends State<NewTaskScreen> {
       });
 
       // Schedule system notification
+      //_scheduleNotification(tasks.last);
       _scheduleNotification(tasks.last);
     }
+  }
+
+  void _deleteTask(int index) async {
+    final task = tasks[index];
+    // Cancel the notification for the task
+    await flutterLocalNotificationsPlugin.cancel(task.hashCode);
+    setState(() {
+      tasks.removeAt(index);
+    });
   }
 
   bool _shouldDisplayTask(Task task) {
@@ -559,92 +564,106 @@ class _NewTaskScreenState extends State<NewTaskScreen> {
   }
 
   Future<void> _scheduleNotification(Task task) async {
+    final String timeZoneName = await FlutterTimezone.getLocalTimezone();
+    final tz.Location _localTimeZone = tz.getLocation(timeZoneName);
 
-  final String timeZoneName = await FlutterNativeTimezone.getLocalTimezone();
-  final tz.Location _localTimeZone = tz.getLocation(timeZoneName);
-  final DateTime notificationDate = DateTime(
-    task.date.year,
-    task.date.month,
-    task.date.day,
-    task.reminderTime.hour,
-    task.reminderTime.minute,
-  );
+    // Ensure the time is correct
+    final DateTime now = DateTime.now();
+    final DateTime notificationDate = DateTime(
+      task.date.year,
+      task.date.month,
+      task.date.day,
+      task.reminderTime.hour,
+      task.reminderTime.minute,
+    );
 
-  
-  const AndroidNotificationChannel channel = AndroidNotificationChannel(
-    'your_channel_id', // Channel ID
-    'your_channel_name', // Channel Name
-    importance: Importance.max,
-    sound: RawResourceAndroidNotificationSound('alarm'), // Sound file
-  );
+    final tz.TZDateTime scheduledDate =
+        tz.TZDateTime.from(notificationDate, _localTimeZone);
 
-  // Create the notification channel
-  await flutterLocalNotificationsPlugin
-      .resolvePlatformSpecificImplementation<
-          AndroidFlutterLocalNotificationsPlugin>()
-      ?.createNotificationChannel(channel);
+    // Prevent scheduling in the past
+    if (scheduledDate.isBefore(tz.TZDateTime.now(_localTimeZone))) {
+      print("Notification time is in the past! Not scheduling.");
+      return;
+    }
 
-  // Define notification details
-  const AndroidNotificationDetails androidPlatformChannelSpecifics =
-      AndroidNotificationDetails(
-    'your_channel_id', // Channel ID
-    'your_channel_name', // Channel Name
-    importance: Importance.max,
-    priority: Priority.high,
-    sound: RawResourceAndroidNotificationSound('alarm'), // Sound file
-    enableVibration: true, // Enable vibration
-    actions: [
-      AndroidNotificationAction('snooze', 'Snooze'), // Snooze action
-      AndroidNotificationAction('stop', 'Stop'), // Stop action
-    ],
-  );
+    // Define notification channel
+    const AndroidNotificationChannel channel = AndroidNotificationChannel(
+      'your_channel_id', // ID
+      'Task Reminders', // Name
+      description: 'Channel for task reminders',
+      importance: Importance.max,
+      sound: RawResourceAndroidNotificationSound('alarm'), // Sound file
+    );
 
-  const NotificationDetails platformChannelSpecifics =
-      NotificationDetails(android: androidPlatformChannelSpecifics);
+    // Ensure the channel is created
+    await flutterLocalNotificationsPlugin
+        .resolvePlatformSpecificImplementation<
+            AndroidFlutterLocalNotificationsPlugin>()
+        ?.createNotificationChannel(channel);
 
-  
-  /*await flutterLocalNotificationsPlugin.zonedSchedule(
-    task.hashCode, // Unique ID for the notification
-    'Task Reminder', // Notification title
-    'Time to complete: ${task.title}', // Notification body
-    tz.TZDateTime.from(notificationDate, _localTimeZone), // Scheduled time
-    platformChannelSpecifics,
-    androidScheduleMode: AndroidScheduleMode.exactAllowWhileIdle, // Exact scheduling
-    uiLocalNotificationDateInterpretation:
-        UILocalNotificationDateInterpretation.absoluteTime,
-  );*/
-  await flutterLocalNotificationsPlugin.zonedSchedule(
-  0, // Unique ID for the notification
-  'Test Notification', // Notification title
-  'This is a test notification', // Notification body
-  tz.TZDateTime.now(_localTimeZone).add(const Duration(seconds: 5)), // Schedule after 5 seconds
-  platformChannelSpecifics,
-  androidScheduleMode: AndroidScheduleMode.exactAllowWhileIdle,
-  uiLocalNotificationDateInterpretation:
-      UILocalNotificationDateInterpretation.absoluteTime,
-);
-}
+    // Define notification details
+    final NotificationDetails notificationDetails = NotificationDetails(
+      android: AndroidNotificationDetails(
+        channel.id,
+        channel.name,
+        channelDescription: channel.description,
+        importance: Importance.max,
+        priority: Priority.high,
+        enableVibration: true,
+        sound: RawResourceAndroidNotificationSound('alarm'),
+        actions: [
+          AndroidNotificationAction('snooze', 'Snooze'),
+          AndroidNotificationAction('stop', 'Stop'),
+        ],
+      ),
+    );
 
-Future<void> testNotification() async {
-  const AndroidNotificationDetails androidPlatformChannelSpecifics =
-      AndroidNotificationDetails(
-    'your_channel_id',
-    'your_channel_name',
-    importance: Importance.max,
-    priority: Priority.high,
-  );
+    print("Scheduling notification at: $scheduledDate");
 
-  const NotificationDetails platformChannelSpecifics =
-      NotificationDetails(android: androidPlatformChannelSpecifics);
+    // Schedule the notification
+    await flutterLocalNotificationsPlugin.zonedSchedule(
+      task.hashCode, // Unique ID
+      'Task Reminder', // Title
+      'Time to complete: ${task.title}', // Body
+      scheduledDate,
+      notificationDetails,
+      androidScheduleMode: AndroidScheduleMode.exactAllowWhileIdle,
+      uiLocalNotificationDateInterpretation:
+          UILocalNotificationDateInterpretation.absoluteTime,
+    );
 
-  await flutterLocalNotificationsPlugin.show(
-    0,
-    'Instant Notification',
-    'This should appear immediately!',
-    platformChannelSpecifics,
-  );
-}
+    final List<PendingNotificationRequest> pendingNotifications =
+        await flutterLocalNotificationsPlugin.pendingNotificationRequests();
 
+    print("Pending Notifications: ${pendingNotifications.length}");
+    for (var notification in pendingNotifications) {
+      print(
+          "ID: ${notification.id}, Title: ${notification.title}, Body: ${notification.body}");
+    }
+  }
+
+  /*Future<void> _scheduleAlarm(Task task) async {
+    final DateTime alarmDateTime = DateTime(
+      task.date.year,
+      task.date.month,
+      task.date.day,
+      task.reminderTime.hour,
+      task.reminderTime.minute,
+    );
+
+    if (alarmDateTime.isBefore(DateTime.now())) {
+      return; // Prevent scheduling past alarms
+    }
+
+    await Alarm.set(
+      alarmDateTime: alarmDateTime,
+      assetAudioPath: 'assets/alarm.mp3',
+      notificationTitle: 'Task Reminder',
+      notificationBody: 'Time to complete: ${task.title}',
+    );
+
+    print("Alarm scheduled successfully for: \$alarmDateTime");
+  }*/
 }
 
 class Task {
